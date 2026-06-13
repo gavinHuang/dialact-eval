@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dialact-eval — Chat</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <!-- Setup Panel -->
+  <div id="setup-panel" class="panel">
+    <div class="panel-inner">
+      <div class="logo">
+        <span class="logo-icon">📞</span>
+        <span class="logo-text">dialact<span class="logo-accent">-eval</span></span>
+      </div>
+      <p class="subtitle">Simulate a voice agent conversation in your browser</p>
+
+      <div class="form-group">
+        <label for="goal-input">Call Goal <span class="required">*</span></label>
+        <textarea id="goal-input" rows="3" placeholder="e.g. Cancel my flight reservation for next Tuesday"></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group half">
+          <label for="agent-name">Agent Name</label>
+          <input type="text" id="agent-name" placeholder="e.g. Alex" />
+        </div>
+        <div class="form-group half">
+          <label for="agent-role">Agent Role</label>
+          <input type="text" id="agent-role" placeholder="a professional assistant" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="caller-context">Caller Context</label>
+        <input type="text" id="caller-context" placeholder="e.g. Account #12345, booking ref XYZABC" />
+      </div>
+
+      <div class="form-group">
+        <label for="constraints">Constraints <span class="hint">(one per line)</span></label>
+        <textarea id="constraints" rows="2" placeholder="e.g. Do not reveal account numbers&#10;Always confirm before cancelling"></textarea>
+      </div>
+
+      <button id="start-btn" class="btn-primary">Start Conversation</button>
+    </div>
+  </div>
+
+  <!-- Chat Panel -->
+  <div id="chat-panel" class="panel hidden">
+    <div class="chat-header">
+      <button id="back-btn" class="btn-icon" title="New session">←</button>
+      <div class="chat-header-info">
+        <span id="header-agent-name" class="agent-label">Agent</span>
+        <span id="header-goal" class="goal-label"></span>
+      </div>
+      <div class="chat-controls">
+        <button id="mic-btn" class="btn-icon mic-btn" title="Hold to speak (or click to toggle)">🎤</button>
+        <button id="tts-btn" class="btn-icon" title="Toggle read-aloud">🔊</button>
+        <button id="reset-btn" class="btn-icon" title="Reset conversation">↺</button>
+      </div>
+    </div>
+
+    <div id="messages" class="messages"></div>
+
+    <div class="input-area">
+      <textarea
+        id="user-input"
+        rows="1"
+        placeholder="Type a message or hold 🎤 to speak…"
+        autocomplete="off"
+      ></textarea>
+      <button id="send-btn" class="btn-send">Send</button>
+    </div>
+
+    <div id="status-bar" class="status-bar">
+      <span id="status-text">Ready</span>
+      <span id="session-id-label" class="session-id"></span>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
