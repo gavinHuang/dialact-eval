@@ -24,8 +24,8 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelMessage, PartDeltaEvent, TextPartDelta
 from pydantic_ai.settings import ModelSettings
 
-from core.log import ServiceLogger
-from core.context import CallContext, build_system_prompt
+from shuo.log import ServiceLogger
+from shuo.context import CallContext, build_system_prompt
 
 log = ServiceLogger("LLM")
 
