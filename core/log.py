@@ -1,8 +1,8 @@
 """Re-exports from shuo.log (voice-agent). Source of truth: voice-agent/shuo/log.py."""
 from shuo.log import (  # noqa: F401
     C,
-    _c,
-    _quote,
+    colorize,
+    quote,
     ServiceLogger,
     ColorFormatter,
     CorrelatedFileFormatter,

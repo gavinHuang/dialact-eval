@@ -215,7 +215,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 # ENTRYPOINT
 # =============================================================================
 
-def serve(port: int = 8080, reload: bool = False):
+def serve(port: int = 8081, reload: bool = False):
     """Start the UI server."""
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=port)

@@ -4,7 +4,7 @@ from shuo.context import (  # noqa: F401
     load_identity_file,
     build_system_prompt,
     confirm_context,
-    _ACTION_CANCEL,
-    _ACTION_PROCEED,
-    _EDITABLE_FIELDS,
+    ACTION_CANCEL,
+    ACTION_PROCEED,
+    EDITABLE_FIELDS,
 )
