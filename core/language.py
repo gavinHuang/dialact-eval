@@ -1,250 +1,162 @@
 """
-language.py — Eval-focused LLM service for dialact-eval.
+language.py — HTTP client for voice-agent's LLM session API.
 
-EvalLanguageModel mirrors the prompt logic and pydantic-ai setup from
-voice-agent's LanguageModel, but without phone/TTS/telemetry dependencies.
+LLMClient delegates all LLM turns to voice-agent's /llm endpoints,
+eliminating the need to duplicate pydantic-ai setup in dialact-eval.
 
-It supports:
-  - Multi-turn conversation history (same as production)
-  - Token streaming via async callback or async generator
-  - Full response accumulation for batch evaluation
-  - All system prompts, tool definitions, and token-suppression logic
+Session lifecycle:
+  - Session is created lazily on first use (POST /llm/sessions)
+  - Session is deleted on aclose() or async context manager exit
+  - Use `async with LLMClient(ctx) as model:` for automatic cleanup
 
-System prompts, token patterns, and output helpers are imported from
-shuo.prompts (voice-agent) — the single source of truth. No duplication.
+Interface matches the old EvalLanguageModel so runner.py and ui/app.py
+call sites are unchanged.
 """
 
+from __future__ import annotations
+
+import json
 import os
-import asyncio
-from dataclasses import dataclass, field
-from typing import Optional, Callable, Awaitable, List, AsyncIterator
+from dataclasses import dataclass
+from typing import AsyncIterator, Callable, Optional, Awaitable
 
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.messages import ModelMessage, PartDeltaEvent, TextPartDelta
-from pydantic_ai.settings import ModelSettings
+import httpx
 
-from shuo.log import ServiceLogger
-from shuo.context import CallContext, build_system_prompt
-from shuo.translation import extract_speech_text
-from shuo.prompts import (
-    PROMPT_WITH_TOOLS,
-    PROMPT_TEXT_TAGS,
-    supports_tools,
-    goal_suffix,
-    is_suppressed_token,
-    is_farewell,
-)
-
-log = ServiceLogger("LLM")
-
-_LLM_TIMEOUT     = float(os.getenv("LLM_TIMEOUT",     "30.0"))
-_LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES",   "1"))
+from shuo.context import CallContext
 
 
 # =============================================================================
-# TURN CONTEXT  (mutable per-turn tool side-effects)
-# =============================================================================
-
-@dataclass
-class _TurnCtx:
-    dtmf_queue:     List[str] = field(default_factory=list)
-    hold_start:     bool = False
-    hold_end:       bool = False
-    hold_continue:  bool = False
-    hangup_pending: bool = False
-
-
-# =============================================================================
-# TURN RESULT  (returned by EvalLanguageModel.generate())
+# TURN RESULT  (mirrors TurnResult in shuo/llm_api.py — built from HTTP JSON)
 # =============================================================================
 
 @dataclass
 class TurnResult:
-    """Outcome of a single LLM turn for evaluation purposes."""
-    text: str                   # Full response text (speech only, control tokens stripped)
-    raw_text: str               # Raw token stream including control tokens
-    dtmf_digits: Optional[str]  # DTMF digits pressed (None if none)
-    hangup: bool                # Agent signalled hangup
-    hold_continue: bool         # Agent is still on hold
-    has_speech: bool            # Response has spoken text
+    """Outcome of a single LLM turn."""
+    text:          str           # Speech text (control tokens stripped)
+    raw_text:      str           # Full token stream including control tokens
+    dtmf_digits:   Optional[str] # DTMF digits pressed (None if none)
+    hangup:        bool          # Agent signalled hangup
+    hold_continue: bool          # Agent is still on hold
+    has_speech:    bool          # Response contains spoken text
+
+
+def _parse_turn_result(data: dict) -> TurnResult:
+    return TurnResult(
+        text=data.get("text", ""),
+        raw_text=data.get("raw_text", ""),
+        dtmf_digits=data.get("dtmf_digits"),
+        hangup=data.get("hangup", False),
+        hold_continue=data.get("hold_continue", False),
+        has_speech=data.get("has_speech", False),
+    )
 
 
 # =============================================================================
-# EVAL LANGUAGE MODEL
+# LLM CLIENT
 # =============================================================================
 
-class EvalLanguageModel:
+class LLMClient:
     """
-    LLM service for evaluation — same prompt logic as voice-agent's LanguageModel
-    but without phone/TTS/telemetry dependencies.
+    Async HTTP client for voice-agent's /llm session API.
 
     Usage:
-        model = EvalLanguageModel(ctx=CallContext(goal="Book a flight"))
-        result = await model.generate("[CALL_STARTED]")
-        result = await model.generate("Hi, how can I help?")
-        print(model.history)  # full pydantic-ai message history
+        async with LLMClient(ctx=CallContext(goal="Book a flight")) as model:
+            result = await model.generate("[CALL_STARTED]")
+            result = await model.generate("Hi, how can I help?")
+
+    Or without context manager (manual cleanup):
+        model = LLMClient(ctx=ctx)
+        result = await model.generate("Hello")
+        await model.aclose()
     """
 
     def __init__(
         self,
-        goal: str = "",
         ctx: Optional[CallContext] = None,
+        goal: str = "",
         callee_lang: str = "English",
+        base_url: Optional[str] = None,
     ):
-        model_name = os.getenv("LLM_MODEL", "groq:llama-3.3-70b-versatile")
-        self._tools_enabled = supports_tools(model_name)
-
-        if ctx is not None:
-            context_suffix = "\n\n" + build_system_prompt(ctx, tools=self._tools_enabled)
-        else:
-            context_suffix = goal_suffix(goal, self._tools_enabled)
-
-        lang_suffix = (
-            f"\n\nIMPORTANT: Always respond in {callee_lang}, regardless of the language of incoming messages."
-            if callee_lang.lower() != "english"
-            else ""
-        )
-        prompt = (
-            (PROMPT_WITH_TOOLS if self._tools_enabled else PROMPT_TEXT_TAGS)
-            + context_suffix
-            + lang_suffix
-        )
-
-        settings = ModelSettings(
-            max_tokens=  int(os.getenv("LLM_MAX_TOKENS",   "500")),
-            temperature= float(os.getenv("LLM_TEMPERATURE", "0.7")),
-        )
-
-        self._agent: Agent[_TurnCtx, str] = Agent(
-            model=model_name,
-            deps_type=_TurnCtx,
-            model_settings=settings,
-        )
-
-        @self._agent.system_prompt
-        def _sys(_ctx: RunContext[_TurnCtx]) -> str:
-            return prompt
-
-        if self._tools_enabled:
-            @self._agent.tool
-            async def press_dtmf(ctx: RunContext[_TurnCtx], digit: str) -> str:
-                """Press a DTMF digit on the phone keypad."""
-                ctx.deps.dtmf_queue.append(digit)
-                return f"Sending digit {digit!r}"
-
-            @self._agent.tool(retries=0)
-            async def signal_hold(ctx: RunContext[_TurnCtx]) -> str:
-                """Signal that hold music has been detected."""
-                ctx.deps.hold_start = True
-                return "Hold mode activated"
-
-            @self._agent.tool(retries=0)
-            async def signal_hold_continue(ctx: RunContext[_TurnCtx]) -> str:
-                """Signal that hold music is still playing."""
-                ctx.deps.hold_continue = True
-                return "Still on hold"
-
-            @self._agent.tool(retries=0)
-            async def signal_hold_end(ctx: RunContext[_TurnCtx]) -> str:
-                """Signal that a real person has returned from hold."""
-                ctx.deps.hold_end = True
-                return "Person returned"
-
-            @self._agent.tool
-            async def signal_hangup(ctx: RunContext[_TurnCtx]) -> str:
-                """Signal that the call should be hung up after this response."""
-                ctx.deps.hangup_pending = True
-                return "Will hang up after audio"
-
-        self._history: List[ModelMessage] = []
         self._ctx = ctx
         self._goal = goal
+        self._callee_lang = callee_lang
+        self._base_url = (base_url or os.getenv("VOICE_AGENT_URL", "http://localhost:3040")).rstrip("/")
+        self._session_id: Optional[str] = None
+        self._http = httpx.AsyncClient(base_url=self._base_url, timeout=60.0)
+
+    # ── Session lifecycle ────────────────────────────────────────────
+
+    async def _ensure_session(self) -> str:
+        if self._session_id is not None:
+            return self._session_id
+
+        body: dict = {"callee_lang": self._callee_lang}
+        if self._ctx is not None:
+            body.update(self._ctx.model_dump())
+        else:
+            body["goal"] = self._goal
+
+        resp = await self._http.post("/llm/sessions", json=body)
+        resp.raise_for_status()
+        self._session_id = resp.json()["session_id"]
+        return self._session_id
+
+    async def aclose(self) -> None:
+        if self._session_id is not None:
+            try:
+                await self._http.delete(f"/llm/sessions/{self._session_id}")
+            except Exception:
+                pass
+            self._session_id = None
+        await self._http.aclose()
+
+    async def __aenter__(self) -> "LLMClient":
+        return self
+
+    async def __aexit__(self, *_) -> None:
+        await self.aclose()
+
+    # ── History helpers (no-ops: history is managed server-side) ────
+
+    def reset(self) -> None:
+        """
+        Reset conversation history.
+
+        Creates a fresh session on next use; the old session is deleted.
+        """
+        if self._session_id is not None:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self._delete_session(self._session_id))
+                else:
+                    loop.run_until_complete(self._delete_session(self._session_id))
+            except Exception:
+                pass
+            self._session_id = None
+
+    async def _delete_session(self, session_id: str) -> None:
+        try:
+            await self._http.delete(f"/llm/sessions/{session_id}")
+        except Exception:
+            pass
 
     # ── Public API ──────────────────────────────────────────────────
 
-    @property
-    def history(self) -> List[ModelMessage]:
-        return self._history.copy()
-
-    def set_history(self, messages: List[ModelMessage]) -> None:
-        self._history = list(messages)
-
-    def reset(self) -> None:
-        """Clear conversation history (start fresh)."""
-        self._history = []
-
     async def generate(self, message: str) -> TurnResult:
         """
-        Generate a response to the given message.
+        Generate a response to the given message (blocking).
 
-        Maintains conversation history across calls.
-        Returns TurnResult with full text, control signals, and metadata.
+        Maintains conversation history across calls (server-side).
         """
-        turn_ctx = _TurnCtx()
-        raw_tokens: List[str] = []
-
-        attempt = 0
-        tokens_emitted = False
-
-        while attempt <= _LLM_MAX_RETRIES:
-            try:
-                async with asyncio.timeout(_LLM_TIMEOUT):
-                    async with self._agent.iter(
-                        message,
-                        deps=turn_ctx,
-                        message_history=self._history,
-                    ) as run:
-                        async for node in run:
-                            if Agent.is_model_request_node(node):
-                                async with node.stream(run.ctx) as stream:
-                                    async for event in stream:
-                                        if (
-                                            isinstance(event, PartDeltaEvent)
-                                            and isinstance(event.delta, TextPartDelta)
-                                            and event.delta.content_delta
-                                        ):
-                                            tokens_emitted = True
-                                            raw_tokens.append(event.delta.content_delta)
-                            elif Agent.is_call_tools_node(node):
-                                async with node.stream(run.ctx) as stream:
-                                    async for _ in stream:
-                                        pass
-
-                    self._history = list(run.result.all_messages())
-                    break
-
-            except asyncio.TimeoutError:
-                log.warning(f"LLM timed out after {_LLM_TIMEOUT}s (attempt {attempt + 1})")
-                if attempt < _LLM_MAX_RETRIES and not tokens_emitted:
-                    attempt += 1
-                    raw_tokens.clear()
-                    continue
-                log.error("LLM timed out — returning empty turn")
-                break
-            except Exception as e:
-                log.error(f"Generation failed (attempt {attempt + 1})", e)
-                if attempt < _LLM_MAX_RETRIES and not tokens_emitted:
-                    attempt += 1
-                    raw_tokens.clear()
-                    continue
-                break
-
-        raw_text = "".join(raw_tokens)
-        speech_text = extract_speech_text(raw_text)
-
-        dtmf_digits = "".join(turn_ctx.dtmf_queue) if turn_ctx.dtmf_queue else None
-        hangup = turn_ctx.hangup_pending
-        if not hangup and dtmf_digits is None and is_farewell(raw_text):
-            hangup = True
-
-        return TurnResult(
-            text=speech_text,
-            raw_text=raw_text,
-            dtmf_digits=dtmf_digits,
-            hangup=hangup,
-            hold_continue=turn_ctx.hold_continue,
-            has_speech=bool(speech_text.strip()) and not turn_ctx.hold_continue and dtmf_digits is None,
+        session_id = await self._ensure_session()
+        resp = await self._http.post(
+            f"/llm/sessions/{session_id}/generate",
+            json={"message": message},
         )
+        resp.raise_for_status()
+        return _parse_turn_result(resp.json())
 
     async def stream_generate(
         self,
@@ -254,60 +166,33 @@ class EvalLanguageModel:
         """
         Stream response tokens, calling on_token for each speech token.
 
-        Control tokens (DTMF, HOLD, etc.) are suppressed from the callback
-        but captured in TurnResult.raw_text.
+        Returns TurnResult after all tokens are received.
         """
-        turn_ctx = _TurnCtx()
-        raw_tokens: List[str] = []
-        response_started = False
+        session_id = await self._ensure_session()
+        result: Optional[TurnResult] = None
 
-        async with self._agent.iter(
-            message,
-            deps=turn_ctx,
-            message_history=self._history,
-        ) as run:
-            async for node in run:
-                if Agent.is_model_request_node(node):
-                    async with node.stream(run.ctx) as stream:
-                        async for event in stream:
-                            if (
-                                isinstance(event, PartDeltaEvent)
-                                and isinstance(event.delta, TextPartDelta)
-                                and event.delta.content_delta
-                            ):
-                                token = event.delta.content_delta
-                                raw_tokens.append(token)
+        async with self._http.stream(
+            "POST",
+            f"/llm/sessions/{session_id}/stream",
+            json={"message": message},
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") == "token":
+                    if on_token:
+                        await on_token(event["text"])
+                elif event.get("type") == "done":
+                    result = _parse_turn_result(event)
 
-                                if on_token and not is_suppressed_token(token):
-                                    # Strip leading punctuation on first speech token
-                                    if not response_started:
-                                        token = token.lstrip(", \t\n")
-                                        if token:
-                                            response_started = True
-                                            await on_token(token)
-                                    else:
-                                        await on_token(token)
-                elif Agent.is_call_tools_node(node):
-                    async with node.stream(run.ctx) as stream:
-                        async for _ in stream:
-                            pass
-
-        self._history = list(run.result.all_messages())
-
-        raw_text = "".join(raw_tokens)
-        speech_text = extract_speech_text(raw_text)
-        dtmf_digits = "".join(turn_ctx.dtmf_queue) if turn_ctx.dtmf_queue else None
-        hangup = turn_ctx.hangup_pending
-        if not hangup and dtmf_digits is None and is_farewell(raw_text):
-            hangup = True
-
-        return TurnResult(
-            text=speech_text,
-            raw_text=raw_text,
-            dtmf_digits=dtmf_digits,
-            hangup=hangup,
-            hold_continue=turn_ctx.hold_continue,
-            has_speech=bool(speech_text.strip()) and not turn_ctx.hold_continue and dtmf_digits is None,
+        return result or TurnResult(
+            text="", raw_text="", dtmf_digits=None,
+            hangup=False, hold_continue=False, has_speech=False,
         )
 
     async def token_stream(self, message: str) -> AsyncIterator[str]:
@@ -318,38 +203,22 @@ class EvalLanguageModel:
             async for token in model.token_stream("Hello"):
                 print(token, end="", flush=True)
         """
-        turn_ctx = _TurnCtx()
-        raw_tokens: List[str] = []
-        response_started = False
+        session_id = await self._ensure_session()
 
-        async with self._agent.iter(
-            message,
-            deps=turn_ctx,
-            message_history=self._history,
-        ) as run:
-            async for node in run:
-                if Agent.is_model_request_node(node):
-                    async with node.stream(run.ctx) as stream:
-                        async for event in stream:
-                            if (
-                                isinstance(event, PartDeltaEvent)
-                                and isinstance(event.delta, TextPartDelta)
-                                and event.delta.content_delta
-                            ):
-                                token = event.delta.content_delta
-                                raw_tokens.append(token)
-
-                                if not is_suppressed_token(token):
-                                    if not response_started:
-                                        token = token.lstrip(", \t\n")
-                                        if token:
-                                            response_started = True
-                                            yield token
-                                    else:
-                                        yield token
-                elif Agent.is_call_tools_node(node):
-                    async with node.stream(run.ctx) as stream:
-                        async for _ in stream:
-                            pass
-
-        self._history = list(run.result.all_messages())
+        async with self._http.stream(
+            "POST",
+            f"/llm/sessions/{session_id}/stream",
+            json={"message": message},
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") == "token":
+                    yield event["text"]
+                elif event.get("type") == "done":
+                    break

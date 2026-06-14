@@ -28,7 +28,7 @@ from deepeval import evaluate
 from deepeval.test_case import LLMTestCase
 
 from core.context import CallContext
-from core.language import EvalLanguageModel
+from core.language import LLMClient
 from eval.dataset import EvalScenario, load_scenario_dataset, scenario_to_test_cases
 from eval.metrics import (
     GoalAdherenceMetric,
@@ -99,8 +99,8 @@ async def _run_two_agent_conversation(
     if scenario.agent.context:
         caller_goal = f"{caller_goal}\n\nContext: {scenario.agent.context}"
 
-    caller_model = EvalLanguageModel(goal=caller_goal)
-    answerer_model = EvalLanguageModel(goal=scenario.answerer.goal)
+    caller_model = LLMClient(goal=caller_goal)
+    answerer_model = LLMClient(goal=scenario.answerer.goal)
 
     conversation: List[dict] = []
     turn_count = 0
@@ -116,32 +116,36 @@ async def _run_two_agent_conversation(
         current_input = "[CALL_STARTED]"
         current_speaker = "caller"
 
-    while turn_count < max_turns:
-        try:
-            if current_speaker == "caller":
-                result = await caller_model.generate(current_input)
-                text = result.text
-                if not text.strip():
-                    break
-                conversation.append({"role": "caller", "text": text})
-                turn_count += 1
-                if result.hangup:
-                    break
-                current_input = text
-                current_speaker = "answerer"
-            else:
-                result = await answerer_model.generate(current_input)
-                text = result.text
-                if not text.strip():
-                    break
-                conversation.append({"role": "answerer", "text": text})
-                turn_count += 1
-                if result.hangup:
-                    break
-                current_input = text
-                current_speaker = "caller"
-        except Exception as e:
-            break
+    try:
+        while turn_count < max_turns:
+            try:
+                if current_speaker == "caller":
+                    result = await caller_model.generate(current_input)
+                    text = result.text
+                    if not text.strip():
+                        break
+                    conversation.append({"role": "caller", "text": text})
+                    turn_count += 1
+                    if result.hangup:
+                        break
+                    current_input = text
+                    current_speaker = "answerer"
+                else:
+                    result = await answerer_model.generate(current_input)
+                    text = result.text
+                    if not text.strip():
+                        break
+                    conversation.append({"role": "answerer", "text": text})
+                    turn_count += 1
+                    if result.hangup:
+                        break
+                    current_input = text
+                    current_speaker = "caller"
+            except Exception:
+                break
+    finally:
+        await caller_model.aclose()
+        await answerer_model.aclose()
 
     return conversation
 
@@ -161,26 +165,29 @@ async def _run_scripted_conversation(
     if scenario.agent.identity:
         goal = f"You are {scenario.agent.identity}. {goal}"
 
-    model = EvalLanguageModel(goal=goal)
+    model = LLMClient(goal=goal)
     conversation: List[dict] = []
 
-    # Opening turn
-    result = await model.generate("[CALL_STARTED]")
-    if result.text.strip():
-        conversation.append({"role": "caller", "text": result.text})
+    try:
+        # Opening turn
+        result = await model.generate("[CALL_STARTED]")
+        if result.text.strip():
+            conversation.append({"role": "caller", "text": result.text})
 
-    for turn in scenario.script:
-        callee_text = turn.callee_says
-        if callee_text:
-            conversation.append({"role": "answerer", "text": callee_text})
+        for turn in scenario.script:
+            callee_text = turn.callee_says
+            if callee_text:
+                conversation.append({"role": "answerer", "text": callee_text})
 
-        result = await model.generate(callee_text)
-        if result.text.strip() or result.dtmf_digits:
-            text = result.text or f"[DTMF:{result.dtmf_digits}]"
-            conversation.append({"role": "caller", "text": text})
+            result = await model.generate(callee_text)
+            if result.text.strip() or result.dtmf_digits:
+                text = result.text or f"[DTMF:{result.dtmf_digits}]"
+                conversation.append({"role": "caller", "text": text})
 
-        if result.hangup:
-            break
+            if result.hangup:
+                break
+    finally:
+        await model.aclose()
 
     return conversation
 

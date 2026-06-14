@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.context import CallContext
-from core.language import EvalLanguageModel
+from core.language import LLMClient
 
 app = FastAPI(title="dialact-eval chat UI", version="0.1.0")
 
@@ -45,7 +45,7 @@ class Session:
     def __init__(self, session_id: str, ctx: CallContext):
         self.id = session_id
         self.ctx = ctx
-        self.model = EvalLanguageModel(ctx=ctx)
+        self.model = LLMClient(ctx=ctx)
         self.conversation: list[dict] = []  # [{"role": "user"|"agent", "text": str}]
         self.started = False
 
@@ -110,7 +110,9 @@ async def get_session(session_id: str):
 @app.delete("/session/{session_id}")
 async def delete_session(session_id: str):
     """Delete a session and free its resources."""
-    _sessions.pop(session_id, None)
+    session = _sessions.pop(session_id, None)
+    if session:
+        await session.model.aclose()
     return {"deleted": session_id}
 
 
