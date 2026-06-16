@@ -1,0 +1,17 @@
+name: DTMF Timeout Loop IVR
+start: stuck_menu
+
+nodes:
+  stuck_menu:
+    type: menu
+    say: "For English, press 1. For Spanish, press 2."
+    gather:
+      timeout: 3
+      num_digits: 1
+    routes:
+      "1": connected
+    default: stuck_menu
+
+  connected:
+    type: softphone
+    say: "Connecting you now."

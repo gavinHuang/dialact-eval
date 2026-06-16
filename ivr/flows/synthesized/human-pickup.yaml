@@ -1,0 +1,29 @@
+name: Human Pickup IVR
+start: welcome
+
+nodes:
+  welcome:
+    type: say
+    say: "Thank you for calling. Press 1 to reach technical support."
+    next: main_menu
+
+  main_menu:
+    type: menu
+    say: "Press 1 for technical support."
+    gather:
+      timeout: 5
+      num_digits: 1
+    routes:
+      "1": queue_hold
+    default: main_menu
+
+  queue_hold:
+    type: hold
+    say: "We appreciate your patience. Your wait time is approximately five minutes."
+    repeat: 2
+    interval: 8
+    next: human
+
+  human:
+    type: softphone
+    say: "Hello, this is technical support, how can I help you today?"

@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>IVR Visual Simulator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --border: #2d3148;
+    --accent: #4f8ef7;
+    --accent2: #7c3aed;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --radius: 8px;
+  }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Header ── */
+  header { padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 1rem; font-weight: 700; letter-spacing: 0.5px; }
+  header h1 span { color: var(--accent); }
+  .goal-input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 7px 12px; border-radius: var(--radius); font-size: 0.85rem; }
+  .goal-input:focus { outline: none; border-color: var(--accent); }
+  .run-btn { background: var(--accent); color: white; border: none; padding: 8px 18px; border-radius: var(--radius); font-weight: 600; cursor: pointer; font-size: 0.85rem; white-space: nowrap; }
+  .run-btn:hover { opacity: 0.88; }
+  .run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .reset-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 7px 12px; border-radius: var(--radius); cursor: pointer; font-size: 0.8rem; }
+  .reset-btn:hover { color: var(--text); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .status-dot.running { background: var(--yellow); animation: pulse 1s infinite; }
+  .status-dot.done { background: var(--green); }
+  .status-dot.error { background: var(--red); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* ── Main layout ── */
+  .main { flex: 1; display: grid; grid-template-columns: 1fr 340px; overflow: hidden; }
+
+  /* ── Flow tree panel ── */
+  .flow-panel { position: relative; overflow: auto; padding: 20px; }
+  svg#flow-svg { display: block; }
+
+  /* Node styles */
+  .node-g { cursor: default; }
+  .node-rect { rx: 8; ry: 8; stroke-width: 1.5; }
+  .node-rect.type-menu   { fill: #1e2a4a; stroke: #3b5fc7; }
+  .node-rect.type-say    { fill: #1a2e1a; stroke: #2d6a2d; }
+  .node-rect.type-hangup { fill: #2e1a1a; stroke: #8b2424; }
+  .node-rect.type-softphone { fill: #2a1a2e; stroke: #7c3aed; }
+  .node-rect.type-hold   { fill: #2a2414; stroke: #7a5c10; }
+  .node-rect.type-pause  { fill: #1a2428; stroke: #2d5c6a; }
+  .node-rect.type-out-of-hours { fill: #2e1a1a; stroke: #6a2d2d; }
+
+  .node-rect.active { stroke: var(--accent) !important; stroke-width: 2.5 !important; filter: drop-shadow(0 0 6px rgba(79,142,247,0.5)); }
+  .node-rect.visited { opacity: 0.6; }
+  .node-rect.on-path { stroke: var(--green) !important; stroke-width: 2 !important; }
+
+  .node-label { font-size: 11px; font-weight: 600; fill: var(--text); }
+  .node-type  { font-size: 9px; fill: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .node-speech { font-size: 9.5px; fill: #94a3b8; }
+
+  /* Edge styles */
+  .edge { stroke: var(--border); stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+  .edge.on-path { stroke: var(--green); stroke-width: 2; }
+  .edge-label { font-size: 9px; fill: var(--muted); }
+  .edge-label.on-path { fill: var(--green); font-weight: 600; }
+
+  /* ── Log panel ── */
+  .log-panel { background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .log-header { padding: 10px 14px; font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+  .log-body { flex: 1; overflow-y: auto; padding: 10px; }
+  .log-entry { margin-bottom: 10px; border-radius: var(--radius); padding: 8px 10px; background: var(--bg); border-left: 3px solid var(--border); }
+  .log-entry.menu   { border-color: #3b5fc7; }
+  .log-entry.say    { border-color: #2d6a2d; }
+  .log-entry.hangup { border-color: #8b2424; }
+  .log-entry.softphone { border-color: #7c3aed; }
+  .log-entry.hold   { border-color: #7a5c10; }
+  .log-step { font-size: 9px; color: var(--muted); font-weight: 600; text-transform: uppercase; margin-bottom: 3px; }
+  .log-node { font-size: 11px; font-weight: 700; color: var(--accent); }
+  .log-speech { font-size: 11px; color: var(--text); margin: 4px 0; line-height: 1.4; }
+  .log-digit { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; margin-top: 4px; }
+  .digit-badge { background: var(--accent); color: white; font-weight: 700; font-size: 11px; border-radius: 4px; padding: 1px 6px; }
+  .log-error { font-size: 10px; color: var(--red); margin-top: 4px; }
+
+  /* ── Empty state ── */
+  .empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 0.85rem; text-align: center; padding: 20px; }
+
+  /* Legend */
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; padding: 8px 20px; background: var(--panel); border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>IVR <span>Simulator</span></h1>
+  <input class="goal-input" id="goal" type="text" placeholder="Agent goal (e.g. 'Navigate to the billing department')" value="Navigate the IVR to reach the billing department" />
+  <button class="reset-btn" id="reset-btn">Reset</button>
+  <button class="run-btn" id="run-btn">▶ Run Agent</button>
+  <div class="status-dot" id="status-dot"></div>
+</header>
+
+<div class="main">
+  <div class="flow-panel" id="flow-panel">
+    <div class="empty" id="flow-empty">Loading IVR flow…</div>
+    <svg id="flow-svg" style="display:none"></svg>
+  </div>
+  <div class="log-panel">
+    <div class="log-header">Simulation Log</div>
+    <div class="log-body" id="log-body">
+      <div class="empty" id="log-empty">Run the agent to see the navigation trace.</div>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <span>Node types:</span>
+  <div class="legend-item"><div class="legend-dot" style="background:#3b5fc7"></div> menu</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#2d6a2d"></div> say</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#8b2424"></div> hangup</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> softphone</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#7a5c10"></div> hold/pause</div>
+  <span style="margin-left:10px">Path:</span>
+  <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div> visited</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#4f8ef7"></div> current</div>
+</div>
+
+<script>
+// ── Graph layout (simple hierarchical layout) ──────────────────────────────
+
+function layoutGraph(graph) {
+  // BFS from start to assign levels
+  const levels = {};
+  const queue = [graph.start];
+  levels[graph.start] = 0;
+  const visited = new Set([graph.start]);
+
+  const adjList = {};
+  for (const node of graph.nodes) adjList[node.id] = [];
+  for (const edge of graph.edges) {
+    if (adjList[edge.from]) adjList[edge.from].push(edge.to);
+  }
+
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    for (const next of (adjList[cur] || [])) {
+      if (!visited.has(next)) {
+        visited.add(next);
+        levels[next] = (levels[cur] || 0) + 1;
+        queue.push(next);
+      }
+    }
+  }
+
+  // Assign unreachable nodes a level at the end
+  for (const node of graph.nodes) {
+    if (!(node.id in levels)) levels[node.id] = Object.keys(levels).length;
+  }
+
+  // Group nodes by level
+  const byLevel = {};
+  for (const [id, lvl] of Object.entries(levels)) {
+    if (!byLevel[lvl]) byLevel[lvl] = [];
+    byLevel[lvl].push(id);
+  }
+
+  // Position nodes
+  const NODE_W = 160, NODE_H = 64, H_GAP = 40, V_GAP = 50;
+  const positions = {};
+  const maxLvl = Math.max(...Object.keys(byLevel).map(Number));
+
+  for (let lvl = 0; lvl <= maxLvl; lvl++) {
+    const ids = byLevel[lvl] || [];
+    const totalW = ids.length * NODE_W + (ids.length - 1) * H_GAP;
+    let x = (ids.length === 1) ? 80 : 80;
+    const y = lvl * (NODE_H + V_GAP) + 20;
+    ids.forEach((id, i) => {
+      positions[id] = {
+        x: 80 + i * (NODE_W + H_GAP),
+        y,
+        w: NODE_W,
+        h: NODE_H,
+      };
+    });
+  }
+
+  // Compute SVG size
+  const maxX = Math.max(...Object.values(positions).map(p => p.x + p.w)) + 40;
+  const maxY = Math.max(...Object.values(positions).map(p => p.y + p.h)) + 40;
+
+  return { positions, width: maxX, height: maxY, levels, byLevel, NODE_W, NODE_H };
+}
+
+// ── SVG rendering ──────────────────────────────────────────────────────────
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgEl(tag, attrs, text) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function truncate(str, max) {
+  if (!str) return "";
+  return str.length > max ? str.slice(0, max - 1) + "…" : str;
+}
+
+let _graph = null;
+let _layout = null;
+let _svg = null;
+let _edgeEls = {};  // "from→to→label" → SVG path element
+let _nodeRects = {}; // node_id → SVG rect element
+
+function renderFlow(graph) {
+  _graph = graph;
+  const layout = layoutGraph(graph);
+  _layout = layout;
+
+  const svg = document.getElementById("flow-svg");
+  svg.innerHTML = "";
+  svg.style.display = "block";
+  svg.setAttribute("width", layout.width);
+  svg.setAttribute("height", layout.height);
+  svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+  _svg = svg;
+  _edgeEls = {};
+  _nodeRects = {};
+
+  // Arrow marker
+  const defs = svgEl("defs");
+  const marker = svgEl("marker", {
+    id: "arrow", markerWidth: "8", markerHeight: "8",
+    refX: "6", refY: "3", orient: "auto",
+  });
+  marker.appendChild(svgEl("path", { d: "M0,0 L0,6 L8,3 z", fill: "#2d3148" }));
+  defs.appendChild(marker);
+
+  const markerGreen = svgEl("marker", {
+    id: "arrow-green", markerWidth: "8", markerHeight: "8",
+    refX: "6", refY: "3", orient: "auto",
+  });
+  markerGreen.appendChild(svgEl("path", { d: "M0,0 L0,6 L8,3 z", fill: "#22c55e" }));
+  defs.appendChild(markerGreen);
+
+  svg.appendChild(defs);
+
+  // Draw edges first (behind nodes)
+  const edgeLayer = svgEl("g");
+  for (const edge of graph.edges) {
+    const fp = layout.positions[edge.from];
+    const tp = layout.positions[edge.to];
+    if (!fp || !tp) continue;
+
+    const x1 = fp.x + fp.w / 2;
+    const y1 = fp.y + fp.h;
+    const x2 = tp.x + tp.w / 2;
+    const y2 = tp.y;
+
+    // Self-loop
+    if (edge.from === edge.to) {
+      const cx = fp.x + fp.w + 20;
+      const cy = fp.y + fp.h / 2;
+      const path = svgEl("path", {
+        d: `M ${fp.x + fp.w} ${fp.y + fp.h / 2 - 8} C ${cx + 20} ${fp.y} ${cx + 20} ${fp.y + fp.h} ${fp.x + fp.w} ${fp.y + fp.h / 2 + 8}`,
+        class: "edge",
+        "marker-end": "url(#arrow)",
+      });
+      edgeLayer.appendChild(path);
+      const key = `${edge.from}→${edge.to}→${edge.label}`;
+      _edgeEls[key] = path;
+      if (edge.label) {
+        edgeLayer.appendChild(svgEl("text", { x: cx + 26, y: cy + 4, class: "edge-label" }, edge.label));
+      }
+      continue;
+    }
+
+    // Slightly curve overlapping edges
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2 - 10;
+
+    const path = svgEl("path", {
+      d: `M ${x1} ${y1} Q ${midX} ${midY} ${x2} ${y2}`,
+      class: "edge",
+      "marker-end": "url(#arrow)",
+    });
+    edgeLayer.appendChild(path);
+
+    const key = `${edge.from}→${edge.to}→${edge.label}`;
+    _edgeEls[key] = path;
+
+    if (edge.label) {
+      const lx = midX + 4;
+      const ly = midY + 4;
+      edgeLayer.appendChild(svgEl("text", { x: lx, y: ly, class: "edge-label" }, edge.label));
+    }
+  }
+  svg.appendChild(edgeLayer);
+
+  // Draw nodes
+  const nodeLayer = svgEl("g");
+  for (const node of graph.nodes) {
+    const p = layout.positions[node.id];
+    if (!p) continue;
+
+    const g = svgEl("g", { class: "node-g", id: `node-g-${node.id}` });
+
+    const rect = svgEl("rect", {
+      x: p.x, y: p.y, width: p.w, height: p.h,
+      class: `node-rect type-${node.type}`,
+      id: `node-rect-${node.id}`,
+    });
+    _nodeRects[node.id] = rect;
+    g.appendChild(rect);
+
+    g.appendChild(svgEl("text", { x: p.x + 8, y: p.y + 14, class: "node-type" }, node.type.toUpperCase()));
+    g.appendChild(svgEl("text", { x: p.x + 8, y: p.y + 27, class: "node-label" }, node.id));
+    if (node.speech) {
+      g.appendChild(svgEl("text", { x: p.x + 8, y: p.y + 41, class: "node-speech" }, truncate(node.speech, 28)));
+      if (node.speech.length > 28) {
+        g.appendChild(svgEl("text", { x: p.x + 8, y: p.y + 53, class: "node-speech" }, truncate(node.speech.slice(28), 28)));
+      }
+    }
+
+    nodeLayer.appendChild(g);
+  }
+  svg.appendChild(nodeLayer);
+
+  document.getElementById("flow-empty").style.display = "none";
+}
+
+// ── Path highlighting ──────────────────────────────────────────────────────
+
+function highlightPath(steps) {
+  // Reset all
+  for (const rect of Object.values(_nodeRects)) {
+    rect.classList.remove("active", "visited", "on-path");
+  }
+  for (const [key, el] of Object.entries(_edgeEls)) {
+    el.classList.remove("on-path");
+    el.setAttribute("marker-end", "url(#arrow)");
+  }
+
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const rect = _nodeRects[step.node_id];
+    if (!rect) continue;
+
+    if (i === steps.length - 1) {
+      rect.classList.add("active");
+    } else {
+      rect.classList.add("on-path");
+    }
+
+    // Highlight the edge we took
+    if (step.next_node) {
+      const label = step.digit || "";
+      const key = `${step.node_id}→${step.next_node}→${label}`;
+      const altKey = `${step.node_id}→${step.next_node}→`;
+      const edgeEl = _edgeEls[key] || _edgeEls[altKey];
+      if (edgeEl) {
+        edgeEl.classList.add("on-path");
+        edgeEl.setAttribute("marker-end", "url(#arrow-green)");
+      }
+    }
+  }
+}
+
+// ── Log rendering ──────────────────────────────────────────────────────────
+
+function addLogEntry(step) {
+  const body = document.getElementById("log-body");
+  const empty = document.getElementById("log-empty");
+  if (empty) empty.style.display = "none";
+
+  const entry = document.createElement("div");
+  entry.className = `log-entry ${step.node_type}`;
+  entry.id = `log-step-${step.step}`;
+
+  const typeIcon = {
+    menu: "☰", say: "💬", hangup: "📴", softphone: "👤", hold: "⏳", pause: "⏸", "out-of-hours": "🌙"
+  }[step.node_type] || "●";
+
+  let html = `<div class="log-step">Step ${step.step} · ${typeIcon} ${step.node_type}</div>`;
+  html += `<div class="log-node">${step.node_id}</div>`;
+  if (step.speech) {
+    html += `<div class="log-speech">"${step.speech}"</div>`;
+  }
+  if (step.digit !== null && step.digit !== undefined) {
+    html += `<div class="log-digit">Pressed: <span class="digit-badge">${step.digit}</span>`;
+    if (step.next_node) html += ` → <span style="color:var(--muted);font-size:10px">${step.next_node}</span>`;
+    html += `</div>`;
+  } else if (step.next_node) {
+    html += `<div style="font-size:10px;color:var(--muted);margin-top:3px">→ ${step.next_node}</div>`;
+  }
+  if (step.node_type === "hangup") {
+    html += `<div style="font-size:10px;color:var(--red);margin-top:3px">Call ended</div>`;
+  }
+  if (step.node_type === "softphone") {
+    html += `<div style="font-size:10px;color:#7c3aed;margin-top:3px">Connected to agent</div>`;
+  }
+  if (step.llm_raw && step.llm_raw.startsWith("[LLM unavailable")) {
+    html += `<div class="log-error">${step.llm_raw}</div>`;
+  }
+
+  entry.innerHTML = html;
+  body.appendChild(entry);
+  body.scrollTop = body.scrollHeight;
+}
+
+// ── Main logic ─────────────────────────────────────────────────────────────
+
+let _steps = [];
+let _sse = null;
+let _running = false;
+
+function setStatus(state) {
+  const dot = document.getElementById("status-dot");
+  dot.className = `status-dot ${state}`;
+}
+
+async function loadFlow() {
+  try {
+    const resp = await fetch("flow");
+    const graph = await resp.json();
+    renderFlow(graph);
+  } catch (e) {
+    document.getElementById("flow-empty").textContent = "Failed to load flow: " + e.message;
+  }
+}
+
+function resetSim() {
+  if (_sse) { _sse.close(); _sse = null; }
+  _steps = [];
+  _running = false;
+  setStatus("");
+  document.getElementById("log-body").innerHTML = `<div class="empty" id="log-empty">Run the agent to see the navigation trace.</div>`;
+  document.getElementById("run-btn").disabled = false;
+  // Reset highlights
+  for (const rect of Object.values(_nodeRects)) {
+    rect.classList.remove("active", "visited", "on-path");
+  }
+  for (const el of Object.values(_edgeEls)) {
+    el.classList.remove("on-path");
+    el.setAttribute("marker-end", "url(#arrow)");
+  }
+}
+
+function runSim() {
+  if (_running) return;
+  resetSim();
+
+  const goal = document.getElementById("goal").value.trim();
+  if (!goal) { alert("Please enter an agent goal."); return; }
+
+  _running = true;
+  document.getElementById("run-btn").disabled = true;
+  setStatus("running");
+
+  const url = `simulate?goal=${encodeURIComponent(goal)}`;
+  _sse = new EventSource(url);
+
+  _sse.addEventListener("step", (e) => {
+    const step = JSON.parse(e.data);
+    _steps.push(step);
+    addLogEntry(step);
+    highlightPath(_steps);
+  });
+
+  _sse.addEventListener("done", (e) => {
+    _sse.close();
+    _sse = null;
+    _running = false;
+    setStatus("done");
+    document.getElementById("run-btn").disabled = false;
+  });
+
+  _sse.addEventListener("error", (e) => {
+    const data = e.data ? JSON.parse(e.data) : null;
+    if (data && data.error) {
+      const body = document.getElementById("log-body");
+      const div = document.createElement("div");
+      div.className = "log-error";
+      div.style.padding = "8px";
+      div.textContent = "Error: " + data.error;
+      body.appendChild(div);
+    }
+    _sse.close();
+    _sse = null;
+    _running = false;
+    setStatus("error");
+    document.getElementById("run-btn").disabled = false;
+  });
+
+  _sse.onerror = () => {
+    if (_sse && _sse.readyState === EventSource.CLOSED) {
+      _running = false;
+      setStatus(_steps.length > 0 ? "done" : "error");
+      document.getElementById("run-btn").disabled = false;
+    }
+  };
+}
+
+document.getElementById("run-btn").addEventListener("click", runSim);
+document.getElementById("reset-btn").addEventListener("click", resetSim);
+document.getElementById("goal").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") runSim();
+});
+
+loadFlow();
+</script>
+</body>
+</html>

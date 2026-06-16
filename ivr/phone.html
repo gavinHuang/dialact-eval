@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IVR Softphone</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+  .phone { background: #16213e; border-radius: 16px; padding: 32px; width: 320px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  h2 { text-align: center; margin-bottom: 20px; font-size: 1.1rem; color: #a0aec0; letter-spacing: 1px; text-transform: uppercase; }
+  #status { text-align: center; font-size: 0.85rem; color: #68d391; margin-bottom: 20px; min-height: 20px; }
+  #log { background: #0f3460; border-radius: 8px; padding: 12px; font-size: 0.78rem; color: #a0aec0; height: 120px; overflow-y: auto; margin-bottom: 20px; font-family: monospace; }
+  .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+  .key { background: #0f3460; border: none; color: #e2e8f0; font-size: 1.2rem; padding: 16px; border-radius: 8px; cursor: pointer; transition: background 0.15s; }
+  .key:hover { background: #1a4a8a; }
+  .key:active { background: #2b6cb0; }
+  .actions { display: flex; gap: 10px; }
+  .btn { flex: 1; padding: 14px; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  #btn-call { background: #38a169; color: white; }
+  #btn-call:hover:not(:disabled) { background: #2f855a; }
+  #btn-hangup { background: #e53e3e; color: white; }
+  #btn-hangup:hover:not(:disabled) { background: #c53030; }
+  .to-field { display: flex; gap: 8px; margin-bottom: 16px; }
+  .to-field input { flex: 1; background: #0f3460; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 8px; padding: 10px; font-size: 0.9rem; }
+  .to-field input:focus { outline: none; border-color: #4a90e2; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <h2>IVR Softphone</h2>
+  <div id="status">Loading…</div>
+  <div class="to-field">
+    <input type="tel" id="to-number" placeholder="+1 (555) 000-0000" />
+  </div>
+  <div id="log"></div>
+
+  <div class="keypad">
+    <button class="key" data-digit="1">1</button>
+    <button class="key" data-digit="2">2</button>
+    <button class="key" data-digit="3">3</button>
+    <button class="key" data-digit="4">4</button>
+    <button class="key" data-digit="5">5</button>
+    <button class="key" data-digit="6">6</button>
+    <button class="key" data-digit="7">7</button>
+    <button class="key" data-digit="8">8</button>
+    <button class="key" data-digit="9">9</button>
+    <button class="key" data-digit="*">*</button>
+    <button class="key" data-digit="0">0</button>
+    <button class="key" data-digit="#">#</button>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="btn-call" disabled>Call</button>
+    <button class="btn" id="btn-hangup" disabled>Hang up</button>
+  </div>
+</div>
+
+<script src="https://sdk.twilio.com/js/client/releases/2.6.0/twilio.js"></script>
+<script>
+let device = null;
+let conn = null;
+
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const btnCall = document.getElementById('btn-call');
+const btnHangup = document.getElementById('btn-hangup');
+const toNumber = document.getElementById('to-number');
+
+function log(msg) {
+  const d = new Date().toLocaleTimeString();
+  logEl.textContent += `[${d}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setStatus(msg, color = '#68d391') {
+  statusEl.textContent = msg;
+  statusEl.style.color = color;
+}
+
+async function init() {
+  try {
+    const res = await fetch('/ivr/token');
+    const data = await res.json();
+    if (data.error) {
+      setStatus('Token error: ' + data.error, '#fc8181');
+      return;
+    }
+
+    device = new Twilio.Device(data.token, { debug: false });
+
+    device.on('ready', () => {
+      setStatus('Ready');
+      btnCall.disabled = false;
+      log('Device ready');
+    });
+
+    device.on('error', (err) => {
+      setStatus('Error: ' + err.message, '#fc8181');
+      log('Error: ' + err.message);
+    });
+
+    device.on('connect', (c) => {
+      conn = c;
+      setStatus('Connected', '#68d391');
+      btnCall.disabled = true;
+      btnHangup.disabled = false;
+      log('Call connected');
+    });
+
+    device.on('disconnect', () => {
+      conn = null;
+      setStatus('Ready');
+      btnCall.disabled = false;
+      btnHangup.disabled = true;
+      log('Call ended');
+    });
+
+    device.on('incoming', (c) => {
+      conn = c;
+      setStatus('Incoming call…', '#f6e05e');
+      btnHangup.disabled = false;
+      log('Incoming call');
+      c.accept();
+    });
+
+  } catch (e) {
+    setStatus('Init failed: ' + e.message, '#fc8181');
+  }
+}
+
+btnCall.addEventListener('click', () => {
+  if (!device) return;
+  const params = {};
+  const to = toNumber.value.trim();
+  if (to) params.To = to;
+  conn = device.connect(params);
+  log('Calling' + (to ? ' ' + to : '…'));
+  btnCall.disabled = true;
+  btnHangup.disabled = false;
+});
+
+btnHangup.addEventListener('click', () => {
+  if (conn) conn.disconnect();
+  else if (device) device.disconnectAll();
+  btnHangup.disabled = true;
+  btnCall.disabled = false;
+});
+
+document.querySelectorAll('.key').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const digit = btn.dataset.digit;
+    if (conn) {
+      conn.sendDigits(digit);
+      log('Sent DTMF: ' + digit);
+    } else {
+      toNumber.value += digit;
+    }
+  });
+});
+
+init();
+</script>
+</body>
+</html>

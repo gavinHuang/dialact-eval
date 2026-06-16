@@ -1,0 +1,87 @@
+name: Example IVR
+start: welcome
+
+nodes:
+  welcome:
+    type: say
+    say: "Welcome to the example IVR system."
+    next: main_menu
+
+  main_menu:
+    type: menu
+    say: "Press 1 for sales. Press 2 for support. Press 0 to speak with an operator. Press 9 to hear this menu again."
+    gather:
+      timeout: 5
+      num_digits: 1
+    routes:
+      "1": sales_greeting
+      "2": support_greeting
+      "0": operator
+      "9": main_menu
+    default: main_menu
+
+  sales_greeting:
+    type: say
+    say: "Thank you for your interest in our products."
+    next: sales_menu
+
+  sales_menu:
+    type: menu
+    say: "Press 1 for pricing. Press 2 to place an order. Press star to return to the main menu."
+    gather:
+      timeout: 5
+      num_digits: 1
+    routes:
+      "1": pricing
+      "2": place_order
+      "*": main_menu
+    default: sales_menu
+
+  pricing:
+    type: say
+    say: "Our pricing starts at ten dollars per month. Press any key to return to the sales menu."
+    next: sales_menu
+
+  place_order:
+    type: say
+    say: "To place an order, please visit our website or speak with a representative."
+    next: goodbye
+
+  support_greeting:
+    type: say
+    say: "Welcome to support."
+    next: support_menu
+
+  support_menu:
+    type: menu
+    say: "Press 1 for technical support. Press 2 for billing. Press star to return to the main menu."
+    gather:
+      timeout: 5
+      num_digits: 1
+    routes:
+      "1": tech_support
+      "2": billing
+      "*": main_menu
+    default: support_menu
+
+  tech_support:
+    type: say
+    say: "Please describe your issue after the tone and someone will call you back."
+    next: goodbye
+
+  billing:
+    type: say
+    say: "For billing inquiries, please have your account number ready."
+    next: goodbye
+
+  operator:
+    type: softphone
+    say: "Please hold while we connect you to an operator."
+
+  goodbye:
+    type: say
+    say: "Thank you for calling. Goodbye."
+    next: hangup
+
+  hangup:
+    type: hangup

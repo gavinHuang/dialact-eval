@@ -1,0 +1,7 @@
+name: Out-Of-Hours IVR
+start: greeting
+
+nodes:
+  greeting:
+    type: out-of-hours
+    say: "Our office is closed at this time. Please try again later."

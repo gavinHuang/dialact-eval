@@ -1,0 +1,29 @@
+name: Hold Queue IVR
+start: welcome
+
+nodes:
+  welcome:
+    type: say
+    say: "Welcome. Press 1 to reach technical support."
+    next: main_menu
+
+  main_menu:
+    type: menu
+    say: "Press 1 for technical support."
+    gather:
+      timeout: 5
+      num_digits: 1
+    routes:
+      "1": queue_hold
+    default: main_menu
+
+  queue_hold:
+    type: hold
+    say: "Your call is important to us. Please continue to hold."
+    repeat: 3
+    interval: 10
+    next: connected
+
+  connected:
+    type: softphone
+    say: "Connecting you now."

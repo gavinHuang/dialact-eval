@@ -1,0 +1,48 @@
+name: Menu Repeat Cap IVR
+nodes:
+  connected:
+    say: Connecting you now.
+    type: softphone
+  goodbye:
+    next: hangup_node
+    say: We are unable to connect your call. Goodbye.
+    type: say
+  hangup_node:
+    type: hangup
+  menu_0:
+    default: menu_1
+    gather:
+      num_digits: 1
+      timeout: 5
+    routes:
+      '1': connected
+    say: Press 1 to reach support. This is attempt 1 of 4.
+    type: menu
+  menu_1:
+    default: menu_2
+    gather:
+      num_digits: 1
+      timeout: 5
+    routes:
+      '1': connected
+    say: Press 1 to reach support. This is attempt 2 of 4.
+    type: menu
+  menu_2:
+    default: menu_3
+    gather:
+      num_digits: 1
+      timeout: 5
+    routes:
+      '1': connected
+    say: Press 1 to reach support. This is attempt 3 of 4.
+    type: menu
+  menu_3:
+    default: goodbye
+    gather:
+      num_digits: 1
+      timeout: 5
+    routes:
+      '1': connected
+    say: Press 1 to reach support. This is attempt 4 of 4.
+    type: menu
+start: menu_0

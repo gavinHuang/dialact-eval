@@ -7,7 +7,7 @@ name = "dialact-eval"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "shuo @ file://../voice-agent",
+    "shuo",
     "pydantic-ai-slim[groq]>=0.2.0",
     "pydantic>=2.0.0",
     "openai>=1.0.0",
@@ -20,6 +20,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
     "deepeval>=1.0.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.scripts]
@@ -32,7 +33,10 @@ markers = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["core*", "eval*", "ui*"]
+include = ["core*", "eval*", "ui*", "ivr*"]
 
 [tool.setuptools.package-dir]
 "" = "."
+
+[tool.uv.sources]
+shuo = { path = "../voice-agent", editable = true }

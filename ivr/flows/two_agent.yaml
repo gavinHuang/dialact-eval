@@ -1,0 +1,48 @@
+name: Two-Agent Handoff
+description: |
+  Simple conversation flow for testing agent-to-agent local calls.
+  The "IVR" side plays a scripted party (e.g., a scheduler) and the
+  agent under test books an appointment.
+start: greeting
+
+nodes:
+  greeting:
+    type: say
+    say: "Hello, this is the scheduling service. How can I help you today?"
+    next: listen_request
+
+  listen_request:
+    type: gather
+    say: ""
+    gather:
+      timeout: 10
+      input: speech
+    routes: {}
+    default: confirm_slot
+
+  confirm_slot:
+    type: say
+    say: "I can schedule that for you. Is Tuesday at 2pm acceptable?"
+    next: listen_confirm
+
+  listen_confirm:
+    type: gather
+    say: ""
+    gather:
+      timeout: 10
+      input: speech
+    routes: {}
+    default: booking_confirmed
+
+  booking_confirmed:
+    type: say
+    say: "Great, I have booked your appointment for Tuesday at 2pm. Is there anything else?"
+    next: farewell
+
+  farewell:
+    type: say
+    say: "Thank you for calling. Goodbye."
+    next: hangup
+
+  hangup:
+    type: hangup
