@@ -8,10 +8,10 @@ Runs an IVR flow entirely in-process (no Twilio, no real calls) by:
      receive a DTMF digit, follow the matching route.
   4. Stop at `hangup` or when max_steps is reached.
 
-LLM calls delegate to voice-agent's /llm/sessions API (POST /llm/sessions,
-POST /llm/sessions/{id}/generate) so the same LanguageModel used in production
-drives the simulation.  If voice-agent is not available the simulator falls back
-to a simple heuristic (press "1" at every menu — useful for unit tests).
+LLM calls go through core.language.LLMClient, which delegates to
+voice-agent's /llm/sessions API — the same LanguageModel used in production.
+If voice-agent is not available the simulator falls back to pressing "1" at
+every menu (useful for unit tests / offline use).
 
 Usage::
 
@@ -26,12 +26,10 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
 import os
-from dataclasses import dataclass, field
-from typing import AsyncIterator, List, Optional
-
-import httpx
+import re
+from dataclasses import dataclass
+from typing import AsyncIterator, Optional
 
 from .config import IVRConfig, Node
 
@@ -64,66 +62,6 @@ class SimStep:
 
 
 # ---------------------------------------------------------------------------
-# LLM client (thin wrapper around voice-agent /llm/sessions)
-# ---------------------------------------------------------------------------
-
-class _LLMSession:
-    """
-    Minimal async HTTP client for voice-agent's stateful LLM session API.
-
-    Raises _LLMUnavailableError if the server is unreachable or returns an error.
-    """
-
-    def __init__(self, base_url: str, goal: str):
-        self._base_url = base_url.rstrip("/")
-        self._goal = goal
-        self._session_id: Optional[str] = None
-        self._client = httpx.AsyncClient(base_url=self._base_url, timeout=30.0)
-
-    async def _ensure_session(self) -> str:
-        if self._session_id:
-            return self._session_id
-        resp = await self._client.post(
-            "/llm/sessions",
-            json={
-                "goal": self._goal,
-                "agent_role": "a caller navigating an IVR phone system",
-                "agent_tone": "direct and efficient",
-            },
-        )
-        resp.raise_for_status()
-        self._session_id = resp.json()["session_id"]
-        return self._session_id
-
-    async def generate(self, message: str) -> dict:
-        sid = await self._ensure_session()
-        resp = await self._client.post(
-            f"/llm/sessions/{sid}/generate",
-            json={"message": message},
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    async def aclose(self) -> None:
-        if self._session_id:
-            try:
-                await self._client.delete(f"/llm/sessions/{self._session_id}")
-            except Exception:
-                pass
-        await self._client.aclose()
-
-    async def __aenter__(self) -> "_LLMSession":
-        return self
-
-    async def __aexit__(self, *_) -> None:
-        await self.aclose()
-
-
-class _LLMUnavailableError(Exception):
-    pass
-
-
-# ---------------------------------------------------------------------------
 # Simulator
 # ---------------------------------------------------------------------------
 
@@ -138,7 +76,7 @@ class IVRSimulator:
     goal : str
         The agent's goal for this call (e.g. "Reach the billing department").
     voice_agent_url : str
-        Base URL of a running voice-agent server (for /llm/sessions).
+        Base URL of a running voice-agent server for /llm/sessions.
         Defaults to $VOICE_AGENT_URL or http://localhost:3040.
     max_steps : int
         Safety limit on the number of nodes visited (prevents infinite loops).
@@ -165,7 +103,12 @@ class IVRSimulator:
 
     async def run(self) -> AsyncIterator[SimStep]:
         """Async generator yielding one SimStep per IVR node visited."""
-        async with _LLMSession(self._base_url, self._goal) as llm:
+        from core.language import LLMClient
+
+        async with LLMClient(
+            goal=self._goal,
+            base_url=self._base_url,
+        ) as llm:
             async for step in self._walk(llm):
                 yield step
 
@@ -173,12 +116,12 @@ class IVRSimulator:
     # Internal walk
     # ------------------------------------------------------------------
 
-    async def _walk(self, llm: _LLMSession) -> AsyncIterator[SimStep]:
+    async def _walk(self, llm) -> AsyncIterator[SimStep]:
         node_id = self._config.start
         step_num = 0
-        pending_speech: list[str] = []  # accumulated narration before a menu
+        pending_speech: list[str] = []
 
-        # Send a [CALL_STARTED] event to prime the LLM (mirrors shuo/agent.py)
+        # Prime the LLM (mirrors shuo/agent.py call start)
         try:
             await llm.generate("[CALL_STARTED]")
         except Exception:
@@ -250,7 +193,6 @@ class IVRSimulator:
                 break  # call would be connected to a human here
 
             elif node.type == "menu":
-                # Build the full IVR prompt for the LLM
                 ivr_prompt = self._build_ivr_prompt(pending_speech, node)
                 pending_speech = []
 
@@ -269,7 +211,6 @@ class IVRSimulator:
                 node_id = next_id
 
             else:
-                # Unknown node type — skip
                 break
 
     # ------------------------------------------------------------------
@@ -287,27 +228,23 @@ class IVRSimulator:
         )
         return "\n".join(parts)
 
-    async def _ask_llm(self, llm: _LLMSession, prompt: str) -> tuple[str, str]:
+    async def _ask_llm(self, llm, prompt: str) -> tuple[str, str]:
         """Ask the LLM which digit to press. Returns (digit, raw_response)."""
         try:
             result = await llm.generate(prompt)
-            raw = result.get("text", "") or result.get("raw_text", "")
+            raw = result.text or result.raw_text or ""
             digit = _extract_digit(raw)
             return digit, raw
         except Exception as exc:
-            # Fallback: press "1" when LLM is unavailable
             return "1", f"[LLM unavailable: {exc}]"
 
 
 def _extract_digit(text: str) -> str:
     """Extract the first DTMF digit (* # 0-9) from an LLM response."""
-    import re
     text = text.strip()
-    # Check for DTMF in TurnResult (voice-agent encodes DTMF as [DTMF:X])
     m = re.search(r'\[DTMF:([0-9*#])\]', text)
     if m:
         return m.group(1)
-    # Bare digit response
     m = re.search(r'[0-9*#]', text)
     if m:
         return m.group(0)
@@ -327,14 +264,8 @@ def flow_to_graph(config: IVRConfig) -> dict:
         {
           "name": "My IVR",
           "start": "main_menu",
-          "nodes": [
-            {"id": "main_menu", "type": "menu", "speech": "Press 1 for...", "routes": {"1": "sales"}},
-            ...
-          ],
-          "edges": [
-            {"from": "main_menu", "to": "sales", "label": "1"},
-            ...
-          ]
+          "nodes": [{"id": "main_menu", "type": "menu", "speech": "Press 1 for..."}, ...],
+          "edges": [{"from": "main_menu", "to": "sales", "label": "1"}, ...]
         }
     """
     nodes = []
@@ -347,19 +278,15 @@ def flow_to_graph(config: IVRConfig) -> dict:
             "speech": node.speech,
         })
 
-        # Edges from routes
         for digit, dest in node.routes.items():
             edges.append({"from": nid, "to": dest, "label": digit})
 
-        # Edge from next
         if node.next and node.next not in node.routes.values():
             edges.append({"from": nid, "to": node.next, "label": ""})
 
-        # Edge from default (if not already covered)
         if node.default and node.default != nid:
             edge_exists = any(
-                e["from"] == nid and e["to"] == node.default
-                for e in edges
+                e["from"] == nid and e["to"] == node.default for e in edges
             )
             if not edge_exists:
                 edges.append({"from": nid, "to": node.default, "label": "default"})

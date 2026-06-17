@@ -261,7 +261,7 @@ async def test_post_twiml_entry(client_simple):
 @pytest.mark.anyio
 async def test_step_say_node(client_simple):
     async with client_simple as c:
-        r = await c.post("/ivr/step?node=welcome")
+        r = await c.post("/step?node=welcome")
     assert r.status_code == 200
     assert "Welcome" in r.text
     assert "Redirect" in r.text
@@ -270,7 +270,7 @@ async def test_step_say_node(client_simple):
 @pytest.mark.anyio
 async def test_step_menu_node(client_simple):
     async with client_simple as c:
-        r = await c.post("/ivr/step?node=main_menu")
+        r = await c.post("/step?node=main_menu")
     assert r.status_code == 200
     assert "Gather" in r.text
     assert "Press 1" in r.text
@@ -279,7 +279,7 @@ async def test_step_menu_node(client_simple):
 @pytest.mark.anyio
 async def test_gather_valid_digit(client_simple):
     async with client_simple as c:
-        r = await c.post("/ivr/gather?node=main_menu", data={"Digits": "1"})
+        r = await c.post("/gather?node=main_menu", data={"Digits": "1"})
     assert r.status_code == 200
     assert "option_one" in r.text
 
@@ -287,7 +287,7 @@ async def test_gather_valid_digit(client_simple):
 @pytest.mark.anyio
 async def test_gather_invalid_digit_reprompts(client_simple):
     async with client_simple as c:
-        r = await c.post("/ivr/gather?node=main_menu", data={"Digits": "9"})
+        r = await c.post("/gather?node=main_menu", data={"Digits": "9"})
     assert r.status_code == 200
     assert "main_menu" in r.text
 
@@ -296,7 +296,7 @@ async def test_gather_invalid_digit_reprompts(client_simple):
 async def test_step_unknown_node_returns_200(client_simple):
     """Unknown node should return graceful error TwiML, not 500."""
     async with client_simple as c:
-        r = await c.post("/ivr/step?node=does_not_exist")
+        r = await c.post("/step?node=does_not_exist")
     assert r.status_code == 200
     assert "Hangup" in r.text
 
@@ -316,30 +316,30 @@ async def test_full_flow_option_one(client_simple):
         assert "welcome" in r.text
 
         # Welcome node: say + redirect to main_menu
-        r = await c.post("/ivr/step?node=welcome")
+        r = await c.post("/step?node=welcome")
         assert "Welcome" in r.text
         assert "main_menu" in r.text
 
         # Main menu: gather
-        r = await c.post("/ivr/step?node=main_menu")
+        r = await c.post("/step?node=main_menu")
         assert "Gather" in r.text
 
         # Press 1
-        r = await c.post("/ivr/gather?node=main_menu", data={"Digits": "1"})
+        r = await c.post("/gather?node=main_menu", data={"Digits": "1"})
         assert "option_one" in r.text
 
         # Option one: say + redirect to goodbye
-        r = await c.post("/ivr/step?node=option_one")
+        r = await c.post("/step?node=option_one")
         assert "option one" in r.text.lower()
         assert "goodbye" in r.text
 
         # Goodbye: say + redirect to hangup
-        r = await c.post("/ivr/step?node=goodbye")
+        r = await c.post("/step?node=goodbye")
         assert "Goodbye" in r.text
         assert "hangup" in r.text
 
         # Hangup
-        r = await c.post("/ivr/step?node=hangup")
+        r = await c.post("/step?node=hangup")
         assert "Hangup" in r.text
 
 
@@ -347,10 +347,10 @@ async def test_full_flow_option_one(client_simple):
 async def test_full_flow_option_two(client_simple):
     """Simulates pressing 2 at main menu."""
     async with client_simple as c:
-        r = await c.post("/ivr/gather?node=main_menu", data={"Digits": "2"})
+        r = await c.post("/gather?node=main_menu", data={"Digits": "2"})
         assert "option_two" in r.text
 
-        r = await c.post("/ivr/step?node=option_two")
+        r = await c.post("/step?node=option_two")
         assert "option two" in r.text.lower()
 
 
@@ -358,13 +358,13 @@ async def test_full_flow_option_two(client_simple):
 async def test_deep_navigation(client_deep):
     """Navigate deep flow: root → level_a → leaf_a1."""
     async with client_deep as c:
-        r = await c.post("/ivr/gather?node=root", data={"Digits": "1"})
+        r = await c.post("/gather?node=root", data={"Digits": "1"})
         assert "level_a" in r.text
 
-        r = await c.post("/ivr/gather?node=level_a", data={"Digits": "1"})
+        r = await c.post("/gather?node=level_a", data={"Digits": "1"})
         assert "leaf_a1" in r.text
 
-        r = await c.post("/ivr/step?node=leaf_a1")
+        r = await c.post("/step?node=leaf_a1")
         assert "Leaf A1" in r.text
 
 
@@ -372,7 +372,7 @@ async def test_deep_navigation(client_deep):
 async def test_back_navigation(client_deep):
     """Navigate to level_a then press * to go back to root."""
     async with client_deep as c:
-        r = await c.post("/ivr/gather?node=level_a", data={"Digits": "*"})
+        r = await c.post("/gather?node=level_a", data={"Digits": "*"})
         assert "root" in r.text
 
 

@@ -36,6 +36,13 @@ app = FastAPI(title="dialact-eval chat UI", version="0.1.0")
 _STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
+# Mount IVR simulator at /ivr
+try:
+    from ivr.server import app as _ivr_app
+    app.mount("/ivr", _ivr_app)
+except Exception:
+    pass  # IVR package not available
+
 
 # =============================================================================
 # SESSION STORE  (in-memory; replace with Redis for multi-process deployments)

@@ -125,10 +125,10 @@ class TwiMLEngine:
         return f'<?xml version="1.0"?><Response><Redirect>{self._step_url(node_id)}</Redirect></Response>'
 
     def _step_url(self, node_id: str) -> str:
-        return f"{self._base}/ivr/step?node={node_id}"
+        return f"{self._base}/step?node={node_id}"
 
     def _gather_url(self, node_id: str) -> str:
-        return f"{self._base}/ivr/gather?node={node_id}"
+        return f"{self._base}/gather?node={node_id}"
 
 
 def _esc(text: str) -> str:

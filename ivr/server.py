@@ -1,22 +1,27 @@
 """
 IVR mock server.
 
-Endpoints:
-    POST /twiml                -- Twilio entry point (start node)
-    POST /ivr/step?node=ID     -- Render a node
-    POST /ivr/gather?node=ID   -- Handle DTMF from a menu
-    GET  /ivr/token            -- Twilio Access Token for browser softphone
-    GET  /phone                -- Browser softphone UI
-    GET  /health               -- Health check
+All routes are relative to the mount point so the app can be mounted at any
+prefix (e.g. /ivr in dialact-eval, /ivr-mock in voice-agent) without path
+duplication.
+
+Endpoints (relative to mount prefix):
+    POST /twiml            -- Twilio entry point (start node)
+    POST /step?node=ID     -- Render a node
+    POST /gather?node=ID   -- Handle DTMF from a menu
+    GET  /token            -- Twilio Access Token for browser softphone
+    GET  /phone            -- Browser softphone UI
+    GET  /health           -- Health check
 
     -- Visual simulator (no Twilio required) --
-    GET  /ivr/ui               -- Visual IVR flow tree + agent simulator UI
-    GET  /ivr/flow             -- IVR config as JSON graph (nodes + edges)
-    GET  /ivr/simulate?goal=X  -- SSE stream: LLM agent navigates the IVR
+    GET  /ui               -- Visual IVR flow tree + agent simulator UI
+    GET  /flow             -- IVR config as JSON graph (nodes + edges)
+    GET  /simulate?goal=X  -- SSE stream: LLM agent navigates the IVR
 
 Environment variables:
     IVR_CONFIG        Path to YAML flow config (default: flows/example.yaml)
-    IVR_BASE_URL      Public base URL (e.g. https://xxxx.ngrok.io)
+    IVR_BASE_URL      Public base URL including mount prefix
+                      (e.g. https://xxxx.ngrok.io/ivr-mock)
     VOICE_AGENT_URL   voice-agent server URL for LLM sessions (default: http://localhost:3040)
     TWILIO_ACCOUNT_SID
     TWILIO_AUTH_TOKEN
@@ -65,13 +70,13 @@ async def twiml_entry():
     return PlainTextResponse(engine.render_entry(), media_type="application/xml")
 
 
-@app.post("/ivr/step")
+@app.post("/step")
 async def ivr_step(node: str = Query(...)):
     """Render a node."""
     engine = _get_engine()
     try:
         xml = engine.render_node(node)
-    except KeyError as e:
+    except KeyError:
         return PlainTextResponse(
             '<?xml version="1.0"?><Response><Say>Configuration error.</Say><Hangup/></Response>',
             media_type="application/xml",
@@ -80,7 +85,7 @@ async def ivr_step(node: str = Query(...)):
     return PlainTextResponse(xml, media_type="application/xml")
 
 
-@app.post("/ivr/gather")
+@app.post("/gather")
 async def ivr_gather(request: Request, node: str = Query(...)):
     """Handle DTMF input."""
     form = await request.form()
@@ -96,7 +101,7 @@ async def ivr_gather(request: Request, node: str = Query(...)):
 # ── Softphone / Token ──────────────────────────────────────────────────────
 
 
-@app.get("/ivr/token")
+@app.get("/token")
 async def ivr_token():
     """Generate Twilio Access Token for browser softphone."""
     try:
@@ -130,7 +135,7 @@ async def phone_ui():
 # ── Visual simulator (no Twilio) ───────────────────────────────────────────
 
 
-@app.get("/ivr/ui", response_class=HTMLResponse)
+@app.get("/ui", response_class=HTMLResponse)
 async def ivr_ui():
     """Visual IVR flow tree + LLM agent simulator UI."""
     html_path = Path(__file__).parent / "ivr_ui.html"
@@ -139,14 +144,14 @@ async def ivr_ui():
     return HTMLResponse("<html><body><p>ivr_ui.html not found</p></body></html>", status_code=404)
 
 
-@app.get("/ivr/flow")
+@app.get("/flow")
 async def ivr_flow():
     """Return the IVR config as a JSON graph (nodes + edges) for UI rendering."""
     engine = _get_engine()
     return JSONResponse(flow_to_graph(_config))
 
 
-@app.get("/ivr/simulate")
+@app.get("/simulate")
 async def ivr_simulate(goal: str = Query(..., description="Agent goal for the simulation")):
     """
     Run an LLM agent through the IVR flow locally (no Twilio).
