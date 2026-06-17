@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-06-18T01:29:06.218489",
+  "flow": "Say Chain",
+  "goal": "listen",
+  "steps_taken": 3,
+  "final_node": "c",
+  "path": [
+    "a",
+    "b",
+    "c"
+  ],
+  "trace": [
+    {
+      "step": 1,
+      "node_id": "a",
+      "node_type": "say",
+      "speech": "First.",
+      "digit": null,
+      "next_node": "b",
+      "llm_raw": ""
+    },
+    {
+      "step": 2,
+      "node_id": "b",
+      "node_type": "say",
+      "speech": "Second.",
+      "digit": null,
+      "next_node": "c",
+      "llm_raw": ""
+    },
+    {
+      "step": 3,
+      "node_id": "c",
+      "node_type": "hangup",
+      "speech": "",
+      "digit": null,
+      "next_node": null,
+      "llm_raw": ""
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "timestamp": "2026-06-18T01:35:53.057103",
+  "flow": "Example IVR",
+  "goal": "Navigate to billing",
+  "steps_taken": 5,
+  "final_node": "pricing",
+  "path": [
+    "welcome",
+    "main_menu",
+    "sales_greeting",
+    "sales_menu",
+    "pricing"
+  ],
+  "trace": [
+    {
+      "step": 1,
+      "node_id": "welcome",
+      "node_type": "say",
+      "speech": "Welcome to the example IVR system.",
+      "digit": null,
+      "next_node": "main_menu",
+      "llm_raw": ""
+    },
+    {
+      "step": 2,
+      "node_id": "main_menu",
+      "node_type": "menu",
+      "speech": "Press 1 for sales. Press 2 for support. Press 0 to speak with an operator. Press 9 to hear this menu again.",
+      "digit": "1",
+      "next_node": "sales_greeting",
+      "llm_raw": "[LLM unavailable: All connection attempts failed]"
+    },
+    {
+      "step": 3,
+      "node_id": "sales_greeting",
+      "node_type": "say",
+      "speech": "Thank you for your interest in our products.",
+      "digit": null,
+      "next_node": "sales_menu",
+      "llm_raw": ""
+    },
+    {
+      "step": 4,
+      "node_id": "sales_menu",
+      "node_type": "menu",
+      "speech": "Press 1 for pricing. Press 2 to place an order. Press star to return to the main menu.",
+      "digit": "1",
+      "next_node": "pricing",
+      "llm_raw": "[LLM unavailable: All connection attempts failed]"
+    },
+    {
+      "step": 5,
+      "node_id": "pricing",
+      "node_type": "say",
+      "speech": "Our pricing starts at ten dollars per month. Press any key to return to the sales menu.",
+      "digit": null,
+      "next_node": "sales_menu",
+      "llm_raw": ""
+    }
+  ]
+}

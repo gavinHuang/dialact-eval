@@ -163,7 +163,8 @@ async def ivr_simulate(goal: str = Query(..., description="Agent goal for the si
     """
     engine = _get_engine()
     voice_agent_url = os.getenv("VOICE_AGENT_URL", "http://localhost:3040")
-    simulator = IVRSimulator(_config, goal=goal, voice_agent_url=voice_agent_url)
+    log_dir = os.getenv("IVR_SIM_LOG_DIR") or None
+    simulator = IVRSimulator(_config, goal=goal, voice_agent_url=voice_agent_url, log_dir=log_dir)
 
     async def event_stream():
         try:

@@ -1,0 +1,61 @@
+{
+  "timestamp": "2026-06-18T01:29:06.226660",
+  "flow": "Loop",
+  "goal": "exit",
+  "steps_taken": 5,
+  "final_node": "loop",
+  "path": [
+    "loop",
+    "loop",
+    "loop",
+    "loop",
+    "loop"
+  ],
+  "trace": [
+    {
+      "step": 1,
+      "node_id": "loop",
+      "node_type": "menu",
+      "speech": "Press 2 to exit.",
+      "digit": "1",
+      "next_node": "loop",
+      "llm_raw": "[LLM unavailable: All connection attempts failed]"
+    },
+    {
+      "step": 2,
+      "node_id": "loop",
+      "node_type": "menu",
+      "speech": "Press 2 to exit.",
+      "digit": "1",
+      "next_node": "loop",
+      "llm_raw": "[LLM unavailable: All connection attempts failed]"
+    },
+    {
+      "step": 3,
+      "node_id": "loop",
+      "node_type": "menu",
+      "speech": "Press 2 to exit.",
+      "digit": "1",
+      "next_node": "loop",
+      "llm_raw": "[LLM unavailable: All connection attempts failed]"
+    },
+    {
+      "step": 4,
+      "node_id": "loop",
+      "node_type": "menu",
+      "speech": "Press 2 to exit.",
+      "digit": "1",
+      "next_node": "loop",
+      "llm_raw": "[LLM unavailable: All connection attempts failed]"
+    },
+    {
+      "step": 5,
+      "node_id": "loop",
+      "node_type": "menu",
+      "speech": "Press 2 to exit.",
+      "digit": "1",
+      "next_node": "loop",
+      "llm_raw": "[LLM unavailable: All connection attempts failed]"
+    }
+  ]
+}

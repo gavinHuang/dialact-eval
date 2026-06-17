@@ -26,10 +26,13 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
-from typing import AsyncIterator, Optional
+from datetime import datetime
+from pathlib import Path
+from typing import AsyncIterator, List, Optional
 
 from .config import IVRConfig, Node
 
@@ -88,6 +91,7 @@ class IVRSimulator:
         goal: str,
         voice_agent_url: Optional[str] = None,
         max_steps: int = 50,
+        log_dir: Optional[str] = None,
     ):
         self._config = config
         self._goal = goal
@@ -96,6 +100,11 @@ class IVRSimulator:
             or os.getenv("VOICE_AGENT_URL", "http://localhost:3040")
         )
         self._max_steps = max_steps
+        _default_log_dir = Path(__file__).parent.parent / "logs" / "ivr_sim"
+        self._log_dir = Path(
+            log_dir
+            or os.getenv("IVR_SIM_LOG_DIR", str(_default_log_dir))
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -105,12 +114,16 @@ class IVRSimulator:
         """Async generator yielding one SimStep per IVR node visited."""
         from core.language import LLMClient
 
+        steps: List[SimStep] = []
         async with LLMClient(
             goal=self._goal,
             base_url=self._base_url,
         ) as llm:
             async for step in self._walk(llm):
+                steps.append(step)
                 yield step
+
+        self._save_log(steps)
 
     # ------------------------------------------------------------------
     # Internal walk
@@ -216,6 +229,34 @@ class IVRSimulator:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _save_log(self, steps: List[SimStep]) -> None:
+        """Write simulation trace to a JSON log file in self._log_dir."""
+        try:
+            self._log_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+            slug = re.sub(r"[^a-z0-9]+", "_", self._goal.lower())[:40].strip("_")
+            filename = self._log_dir / f"ivr_sim_{ts}_{slug}.json"
+
+            final_node = steps[-1].node_id if steps else None
+            reached_goal = any(s.node_type == "softphone" for s in steps) or (
+                steps[-1].node_type == "hangup" if steps else False
+            )
+
+            log = {
+                "timestamp": datetime.now().isoformat(),
+                "flow": self._config.name,
+                "goal": self._goal,
+                "steps_taken": len(steps),
+                "final_node": final_node,
+                "path": [s.node_id for s in steps],
+                "trace": [s.to_dict() for s in steps],
+            }
+
+            with open(filename, "w") as f:
+                json.dump(log, f, indent=2)
+        except Exception:
+            pass  # logging must never break the simulation
 
     def _build_ivr_prompt(self, preceding: list[str], menu_node: Node) -> str:
         parts: list[str] = []

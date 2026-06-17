@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-06-18T01:29:06.213678",
+  "flow": "Menu Flow",
+  "goal": "go anywhere",
+  "steps_taken": 3,
+  "final_node": "done",
+  "path": [
+    "root",
+    "branch_a",
+    "done"
+  ],
+  "trace": [
+    {
+      "step": 1,
+      "node_id": "root",
+      "node_type": "menu",
+      "speech": "Press 1 for A. Press 2 for B.",
+      "digit": "1",
+      "next_node": "branch_a",
+      "llm_raw": "[LLM unavailable: All connection attempts failed]"
+    },
+    {
+      "step": 2,
+      "node_id": "branch_a",
+      "node_type": "say",
+      "speech": "You chose A.",
+      "digit": null,
+      "next_node": "done",
+      "llm_raw": ""
+    },
+    {
+      "step": 3,
+      "node_id": "done",
+      "node_type": "hangup",
+      "speech": "",
+      "digit": null,
+      "next_node": null,
+      "llm_raw": ""
+    }
+  ]
+}
